@@ -61,6 +61,31 @@ Praktik yang sudah berjalan dan sebaiknya diteruskan:
 
 ## 2. Yang Baru Saja Dikerjakan
 
+### Sesi 3 September 2026 — Verifikasi branch protection `main` pasca transfer ownership + menutup celah required status check
+
+Reno minta cek ulang (read-only) branch protection rule `main` di
+`generusbekasitimur-arch/gensiti-app` pasca transfer ownership repo, untuk pastikan
+settingnya belum berubah/hilang.
+
+- **Verifikasi via GitHub MCP** (`list_branches`): `main` masih `protected: true`.
+- **Detail rule tidak bisa dibaca lewat tool** — server MCP GitHub yang tersedia di sesi ini
+  tidak punya tool `get_branch_protection`/setara, dan sesi ini juga tidak punya akses `gh`
+  CLI atau REST API GitHub langsung. Reno mengonfirmasi lewat screenshot halaman
+  `Settings → Branches → main` (rule id `80720860`) sebagai gantinya.
+- **Hasil konfirmasi dari screenshot**: "Require a pull request before merging" ✅, "Require
+  approvals" ✅ (minimal 1), "Do not allow bypassing the above settings" ✅ — tiga setting inti
+  yang diminta Reno semuanya masih aktif, tidak berubah.
+- **Celah yang ditemukan**: "Require status checks to pass before merging" ternyata sudah
+  tercentang tapi **tanpa satupun check terdaftar** ("No required checks") — jadi toggle-nya
+  nyala tapi tidak benar-benar mengunci apa-apa; PR yang CI-nya merah tetap bisa di-merge.
+- **Tindak lanjut**: job CI di `.github/workflows/ci.yml` bernama **"Type check, lint, and
+  test"** (job key `verify`; jalan `npm run typecheck`, `npm run lint`, `npm run test` di tiap
+  push/PR ke `main`). Tidak ada tool MCP untuk menulis branch protection setting secara
+  otomatis, jadi PR ini dibuka justru untuk memicu satu run CI supaya nama check itu muncul di
+  kolom pencarian GitHub (`Settings → Branches → main → Require status checks... → search`) —
+  Reno tinggal cari "Type check, lint, and test" di situ, klik tambahkan, lalu **Save changes**.
+  Setelah itu, PR yang gagal CI benar-benar tidak bisa di-merge ke `main`.
+
 ### Sesi 29 Juli 2026 (lanjutan) — A3 selesai: backup otomatis ke Storage (Opsi C) + restorability diverifikasi nyata
 
 ⚠️ **TINDAK LANJUT MANUAL DIPERLUKAN DARI RENO**: project Supabase throwaway
