@@ -496,7 +496,7 @@ benar-benar dikerjakan sejak itu:
 | B2 | ✅ Selesai | PR #12 | Fix navigasi PPG -- 1 baris di `layout.tsx`, `/generus` ditambahkan ke `roles` array |
 | B5 | ✅ Selesai | PR #12 | Tombol export PDF/Excel di `profil/riwayat-absensi` |
 | A1 | ✅ Selesai | `260aad3` | `RUNBOOK_RECOVERY_SUPER_ADMIN.md` -- 4 skenario recovery lewat Supabase Dashboard |
-| A3 | ✅ Selesai (Opsi B: reminder) | `a195537` | Reminder mingguan pg_cron kalau backup manual >30 hari -- BUKAN backup otomatis (Opsi C ditunda, butuh keputusan scope akses storage terpisah) |
+| A3 | ✅ Selesai penuh (Opsi B reminder + Opsi C backup otomatis) | Opsi B: `a195537`; Opsi C: PR #40 | **Dikoreksi 4 Okt 2026** -- sebelumnya baris ini menulis Opsi C "ditunda". Opsi B (reminder mingguan pg_cron kalau backup manual >30 hari) lalu **digantikan** oleh Opsi C: Edge Function `scheduled-backup` (pg_cron Senin 01:00 UTC) menyimpan JSON 10 tabel ke bucket Storage PRIVATE `backups` tanpa satu pun storage policy (akses hanya service role + project owner lewat Dashboard -- jawaban atas red flag scope akses di assessment awal), retensi 8 file (trade-off sadar), alert `alert_auto_backup_bermasalah` (grace 9 hari). **Restorability terverifikasi nyata 10/10 tabel** lewat project Supabase throwaway (Free plan tidak mendukung `create_branch`); detail di ARCHITECTURE.md §8 dan HANDOFF.md Sesi 29 Juli 2026. Catatan lanjutan: pemanggilan cron kini membaca secret lewat Vault (HANDOFF.md Sesi 30 Sep -- 4 Okt 2026); bug laten tipe email `'peringatan'` di fungsi alert belum diperbaiki (lihat sana) |
 | A2 | ✅ Selesai sebagian | `254e168` | Card rate-limit (gap #2) selesai penuh. Sentry (gap #1): link-out ke Sentry Issues selesai, live error count DITUNDA (butuh `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT` diisi dulu di Vercel) |
 | A7 | ✅ Selesai (versi read-only) | `254e168` | Sama dengan card A2 gap #2 di atas -- versi notifikasi aktif (push/email kalau threshold tercapai) belum dikerjakan, masih opsi terpisah kalau dibutuhkan |
 | A6 | ✅ Selesai (versi eskalasi manual, bukan auto-approve) | PR #18 | Ketua bisa ambil alih Setujui/Tolak reimbursement kalau Bendahara belum proses >3 hari, + reminder proaktif harian ke approver kegiatan/pengumuman/reimbursement. Opsi auto-approve yang sempat diusulkan DITOLAK (risiko governance keuangan) -- desain final tetap butuh aksi manual manusia. Detail di HANDOFF.md Sesi 26 Juli 2026 |
@@ -505,6 +505,15 @@ benar-benar dikerjakan sejak itu:
 | A4 + A5 | ✅ Selesai (Opsi B: maks 2 sesi, bukan unlimited) | migrasi `a4_multi_device_session` | Tabel `user_sessions` (1 baris/device) menggantikan kolom tunggal `active_session_token`. Keputusan produk dikonfirmasi eksplisit dgn Reno: batas 2 sesi (sengaja bukan unlimited -- tetap jadi rem alami thd sharing akun), UI kelola/logout device sejak versi pertama (bukan menyusul). RPC `claim_session` menggantikan `app/api/session/claim` sesuai rekomendasi lama NATIVE_READINESS_AUDIT.md §B.2. A5 (tab Sesi Aktif Monitoring) ikut dirombak sesuai dependency yang sudah diprediksi di assessment awal. Detail lengkap di HANDOFF.md Sesi 27 Juli 2026 |
 | B1 | ✅ Selesai v1 (badge personal, bukan leaderboard) | `lib/badges.ts` | Setelah diskusi non-teknis dgn Reno: badge personal saja (leaderboard publik ditolak -- risiko kompetisi tidak sehat di organisasi keagamaan/sosial), pemicu bertahap dari presensi (bukan poin datar/streak-kegiatan-selesai dari awal). 3 badge dihitung on-the-fly dari `absensi` (streak hadir, rajin bulan ini, konsisten 3 bulan) -- TANPA tabel/RPC baru. Threshold masih tebakan awal (baru 1 kegiatan tercatat di DB saat ditulis), wajar dikalibrasi ulang. Detail di HANDOFF.md Sesi 27 Juli 2026 (lanjutan 3) |
 
+Dua pekerjaan berikut BUKAN item dari 12 wishlist asli (permintaan terpisah dari
+Reno), dicatat di sini supaya riwayat status tidak ketinggalan:
+
+| Pekerjaan | Status | PR | Catatan |
+|---|---|---|---|
+| Redesain navigasi "Opsi C", Tahap 1 (sidebar desktop liquid glass) | ✅ Selesai | PR #37 | Sidebar `lg:` jadi kartu glassmorphism mengambang + tooltip hover saat collapsed. Detail di HANDOFF.md Sesi 28 Juli 2026 (lanjutan 9) |
+| Redesain navigasi "Opsi C", Tahap 2 (bottom nav mobile) | ✅ Selesai | PR #39 | Drawer hamburger dihapus total, diganti bottom nav 4 menu per kelompok peran + sheet "Lainnya"; label selalu tampil. "Absensi" Generus mengarah ke `/profil/riwayat-absensi` (self-view), bukan `/absensi` pengurus. Detail di HANDOFF.md Sesi 29 Juli 2026 dan ARCHITECTURE.md §7 |
+
 Semua item di tabel Ringkasan sudah punya status implementasi (selesai penuh
 atau selesai sebagian dgn catatan) -- tidak ada lagi item wishlist yang masih
-murni assessment tanpa kode.
+murni assessment tanpa kode. Satu-satunya yang masih sebagian: **A2** (live error
+count Sentry di Kesehatan Sistem, ditunda -- butuh token + slug org/project Sentry diisi di Vercel).

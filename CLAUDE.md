@@ -148,7 +148,7 @@ npm audit
 - [~] Fitur absensi via Kartu RFID (mode kiosk, dioperasikan Pengurus) — skema, RPC, dan UI sudah lengkap (ARCHITECTURE.md §11), tapi **dikunci non-aktif** lewat `RFID_PRESENSI_READY = false` di `lib/rfid.ts` sampai diuji pakai reader USB fisik sungguhan. E-money belum digarap.
 - [ ] PWA (Progressive Web App) sebagai jembatan sebelum native app
 - [ ] Native mobile app pakai Flutter (Android duluan, iOS menyusul)
-- [ ] Migrasi ownership Supabase, Vercel, Resend, dan domain Hostinger ke akun `generusbekasitimur@gmail.com` setelah app matang
+- [~] Migrasi ownership ke akun `generusbekasitimur@gmail.com` — Supabase ✅, GitHub ✅, Resend ✅; Vercel ⏳ ditunda (transfer resmi butuh Pro plan; opsi redeploy manual); domain Hostinger belum. Detail: HANDOFF.md "Sesi 30 Sep – 4 Okt 2026"
 
 ## Checklist Sebelum Commit/Deploy
 

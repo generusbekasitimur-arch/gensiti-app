@@ -13,7 +13,7 @@ Desa > Kelompok, plus jalur khusus PPG). Fungsi utamanya: data keanggotaan (Gene
 muda & Pembina/PPG), absensi kegiatan, laporan bulanan, keuangan, dokumen, dan monitoring
 sistem.
 
-- **Repo**: `github.com/Moreno19Ryan/gensiti-app` (branch `main`)
+- **Repo**: `github.com/generusbekasitimur-arch/gensiti-app` (branch `main`; dulu `Moreno19Ryan/gensiti-app`, URL lama masih ter-redirect)
 - **Live**: `gensiti-app.vercel.app` -- auto-deploy dari push ke `main` lewat Vercel
 - **Stack**: Next.js (App Router) + TypeScript + Supabase (Postgres, Auth, RLS, Realtime,
   Edge Functions) + Tailwind
@@ -61,6 +61,143 @@ Praktik yang sudah berjalan dan sebaiknya diteruskan:
 
 ## 2. Yang Baru Saja Dikerjakan
 
+### Sesi 30 Sep – 4 Okt 2026 — Secret internal pindah ke Vault (Tahap 1), pengetatan akses fungsi cron, status migrasi akun
+
+Tidak ada perubahan kode aplikasi. Semua perubahan di sesi ini ada di database (2 migrasi) dan
+pengaturan akun. **Tidak ada nilai secret di dokumen ini, hanya namanya.** Penanda: *(terverifikasi)*
+= dicek ulang langsung dari database/GitHub/Vercel saat dokumen ini ditulis (4 Okt 2026);
+*(dilaporkan Reno)* = disampaikan Reno, tidak bisa dicek ulang dari sesi Claude Code ini;
+*(dijalankan dari chat Claude.ai)* = dikerjakan di sesi chat Claude.ai lewat connector Supabase
+atas persetujuan Reno, bukti respons sementara sudah lewat retensi.
+
+**1. Tahap 1 — secret `x-internal-secret` pindah ke Vault (migrasi `tahap1_internal_secret_via_vault`, 3 Okt 2026).**
+Sebelumnya nilai secret yang dipakai pg_cron/trigger untuk memanggil Edge Function tertulis
+langsung (literal) di badan 5 fungsi `SECURITY DEFINER`. Sekarang:
+- Secret tersimpan di Supabase Vault dengan nama **`internal_function_secret`** (1 secret) *(terverifikasi)*.
+- Schema baru **`internal`** berisi helper **`internal.get_internal_secret()`** — `SECURITY DEFINER`,
+  `EXECUTE` hanya untuk `postgres` dan `service_role`; `anon` dan `authenticated` tanpa `USAGE`
+  atas schema `internal` *(terverifikasi)*.
+- 5 fungsi diubah membaca lewat helper (hanya itu yang berubah — kerangka fungsi, `search_path`,
+  argumen, dan ACL tidak berubah): `trigger_scheduled_backup`, `fetch_berita_organisasi_cron`,
+  `fetch_berita_ldii_cron`, `notify_email`, `notify_push`. Di `notify_email`/`notify_push`
+  helper dipanggil SETELAH early-return untuk penerima kosong/null.
+- Jumlah fungsi di schema `public` yang masih memuat literal secret: **0**; kelima fungsi memanggil
+  helper *(terverifikasi)*. Migrasi diterapkan dari sesi chat Claude.ai dengan persetujuan Reno
+  *(dilaporkan Reno)*. Sebelum diterapkan, diff per fungsi dibuktikan mekanis (hanya baris
+  deklarasi secret yang berubah) dan rancangan migrasi memuat assert yang me-rollback otomatis
+  kalau metadata/ACL berubah.
+- Hasil uji (3–4 Okt), semuanya dijalankan dari sesi chat Claude.ai lewat connector Supabase atas
+  persetujuan Reno:
+  - `fetch_berita_organisasi_cron` — lulus (HTTP 200) *(dijalankan dari chat Claude.ai; bukti
+    respons sudah lewat retensi pg_net ±6 jam)*. Yang bisa dicek ulang: run cron
+    `fetch-berita-organisasi` 4 Okt 00:00 UTC pasca-migrasi berstatus HTTP 200 *(terverifikasi)*.
+  - `notify_push` ke akun Reno — HTTP 200 dengan isi `total 2, sent 1, failed 1, stale_removed 1`
+    (secret diterima; satu subscription kedaluwarsa otomatis dibersihkan `send-push`)
+    *(dijalankan dari chat Claude.ai; bukti respons sudah lewat retensi)*.
+  - `notify_email` — `email_log` mencatat 1 baris subject `Uji sistem`, status `sent`, tipe
+    `maintenance`, tanpa error, 4 Okt 2026 02:32 UTC *(terverifikasi)*.
+- **Belum dikerjakan — Tahap 2 (rotasi nilai secret):** nilai lama pernah tercetak di transkrip
+  sesi kerja dan masih menjadi nilai aktif, jadi rotasi tetap perlu. Keputusan: tanpa jendela
+  dual-secret (rotasi cepat di malam hari), dijadwalkan SETELAH backup otomatis Senin 5 Okt 2026
+  (01:00 UTC, `scheduled-backup`) terbukti sukses. **Edge Function (`send-email`, `send-push`,
+  `fetch-berita-ldii`, `fetch-berita-organisasi`, `scheduled-backup`) masih membaca
+  `INTERNAL_FUNCTION_SECRET` dari environment variable function** — Tahap 2 harus mengubah
+  Vault dan env itu bersamaan.
+- Repo ini publik: pencarian di file ter-track git dan seluruh riwayat commit tidak menemukan
+  NILAI secret *(terverifikasi 30 Sep, sebelum dokumen ini menambahkan nama secret/variabelnya)*.
+  Source Edge Function tidak ada di repo (hanya di Supabase), jadi tidak ikut terperiksa.
+
+**2. Migrasi `revoke_public_execute_internal_cron_functions` (30 Sep 2026).** Security advisor
+menandai fungsi `SECURITY DEFINER` yang bisa dipanggil `anon` lewat `/rest/v1/rpc/...`. Akar
+masalahnya: ACL default Postgres memberi `EXECUTE` ke `PUBLIC`, jadi `REVOKE ... FROM anon` saja
+tidak cukup — harus `FROM PUBLIC`.
+- `trigger_scheduled_backup`, `alert_auto_backup_bermasalah`, `fetch_berita_organisasi_cron`:
+  `EXECUTE` dicabut dari `PUBLIC`/`anon`/`authenticated`, hanya `postgres` (pemilik, dipakai
+  pg_cron) dan `service_role`. Ketiganya tanpa guard internal — `trigger_scheduled_backup`
+  yang dipanggil berulang bisa membilas backup mingguan yang sah lewat retensi 8 file.
+- `get_rate_limit_summary`: dicabut dari `PUBLIC`/`anon`; `authenticated` tetap (dipakai tab
+  Kesehatan Sistem, sudah punya guard Super Admin/Team IT).
+- Tidak ada pemanggil lain (dicek lewat `pg_proc.prosrc`, view, policy, trigger, dan kode
+  aplikasi). ACL hasil akhir dan run cron `fetch-berita-organisasi` pasca-migrasi (HTTP 200)
+  *(terverifikasi)*.
+- **Temuan terbuka:** security advisor (30 Sep) masih menandai **24 fungsi lain** yang bisa
+  dipanggil `anon`. Sebagian mungkin memang disengaja publik. **Audit satu per satu belum
+  dikerjakan.** Daftar namanya SENGAJA tidak ditulis di sini (repo ini publik) — ambil dari
+  security advisor Supabase (lint `anon_security_definer_function_executable`). Temuan lama
+  lain: leaked-password protection Supabase Auth masih nonaktif.
+- Sisa lama: `fetch_berita_ldii_cron` + Edge Function `fetch-berita-ldii` tidak lagi dipanggil
+  cron apa pun (digantikan `fetch-berita-organisasi`), tabel `berita_ldii` masih ada (14 baris).
+  Bisa dibersihkan terpisah.
+
+**3. Catatan `email_log.tipe` (CHECK constraint).** Kolom hanya menerima: `pengumuman`, `kegiatan`,
+`reminder`, `approval_ppg`, `reset_password`, `maintenance`, `maintenance_scheduled`
+(`email_log_tipe_check`) *(terverifikasi)*. Memanggil `notify_email` dengan tipe lain tidak
+menggagalkan pengiriman email, tetapi baris `email_log`-nya gagal dibuat — Edge Function
+`send-email` menelan error insert itu (hanya `console.error`).
+- **Bug laten yang ditemukan saat memeriksa ini (belum diperbaiki):** `alert_auto_backup_bermasalah()`
+  (A3 Opsi C) memanggil `notify_email(..., 'peringatan', ...)`, tipe yang TIDAK ada di daftar
+  di atas *(terverifikasi, satu-satunya fungsi dengan pola ini)*. Dampaknya: kalau alert backup
+  pernah terpicu, email tetap terkirim ke Super Admin tetapi tidak tercatat di Email Log. Belum
+  pernah terpicu karena backup sehat. **Tetap terbuka — sengaja TIDAK diperbaiki di PR dokumentasi
+  ini**; perbaikan (ganti tipe ke yang valid atau perluas CHECK) perlu migrasi terpisah dengan
+  "OK, jalankan".
+- **Audit read-only semua pemanggil `notify_email` (4 Okt 2026)** *(terverifikasi lewat
+  `pg_proc.prosrc` + kode aplikasi)*: 10 fungsi database + 2 route aplikasi. Tipe yang dipakai
+  dibandingkan dengan `email_log_tipe_check`:
+
+  | Pemanggil | Tipe | Valid? |
+  |---|---|---|
+  | `send_reminder_h1_kegiatan`, `send_reminder_laporan_belum_diisi`, `send_reminder_approval_kegiatan_pengumuman` (2 panggilan), `send_reminder_approval_reimbursement` (2 panggilan) | `reminder` | ✅ |
+  | `trg_notify_email_approval_ppg` | `approval_ppg` | ✅ |
+  | `trg_notify_email_kegiatan` | `kegiatan` | ✅ |
+  | `trg_notify_email_pengumuman` | `pengumuman` | ✅ |
+  | `trg_notify_email_maintenance` | `maintenance` | ✅ |
+  | `trg_notify_email_maintenance_scheduled` | `maintenance_scheduled` | ✅ |
+  | route `app/api/password-reset/request` & `.../confirm` (RPC lewat service role) | `reset_password` | ✅ |
+  | **`alert_auto_backup_bermasalah`** | **`peringatan`** | ❌ satu-satunya |
+
+**4. Status migrasi akun ke `generusbekasitimur@gmail.com`** (rencana di CLAUDE.md §"Rencana
+Pengembangan ke Depan"):
+
+| Layanan | Status |
+|---|---|
+| Supabase | ✅ Selesai — org "KMM Bekasi Timur"; project `ccyqgcfjmzgkmkczuydv` `ACTIVE_HEALTHY` *(terverifikasi 30 Sep)* |
+| GitHub | ✅ Selesai — repo kini `generusbekasitimur-arch/gensiti-app` (URL lama `Moreno19Ryan/...` masih ter-redirect) *(terverifikasi)* |
+| Sentry | ✅ Selesai *(dilaporkan Reno)*. DSN (`SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`) ada di Vercel, scope Production+Preview *(terverifikasi 29 Sep)* |
+| Resend | ✅ Selesai — akun organisasi sudah Admin pada team "KMM Bekasi Timur", **dipakai bersama key KIRAIN — jangan dihapus**; domain `ryza-kmmbektim.org` verified; fitur Receiving dimatikan *(dilaporkan Reno; tidak terverifikasi dari sesi ini)* |
+| Vercel | ⏳ Ditunda — transfer resmi butuh Pro plan; opsi yang dipilih: redeploy manual. `DEPLOYMENT_HISTORY_ARCHIVE.md` **belum dibuat**. Auto-deploy dari repo di owner baru **terbukti jalan**: deployment production sejak commit `b772228` (merge PR #41, 30 Sep) berstatus `READY` dengan `githubOrg: generusbekasitimur-arch` *(terverifikasi 30 Sep)* |
+| Domain Hostinger | Belum disentuh |
+
+**5. Branch protection `main` (GitHub).** Menindaklanjuti entri 3 September di bawah: check
+**"Type check, lint, and test"** (GitHub Actions, job `verify`) kini terdaftar sebagai required
+status check, sehingga celah "No required checks" tertutup *(dilaporkan Reno; tool MCP tidak bisa
+membaca detail aturan)*. Praktis: PR yang dibuat dari akun `generusbekasitimur-arch` harus
+di-approve akun lain (`Moreno19Ryan`) — penulis PR tidak bisa menyetujui PR-nya sendiri. PR #41
+sempat ditolak merge (HTTP 405, "At least 1 approving review is required") sampai di-approve, lalu
+di-merge oleh `Moreno19Ryan` pada 30 Sep *(terverifikasi)*.
+
+**6. Koreksi status dokumen.** Sebelum PR ini `HANDOFF.md` terakhir diperbarui 3 September dan
+tabel status `WISHLIST_ASSESSMENT.md` masih menulis A3 sebagai "Opsi B saja"; keduanya
+disinkronkan di PR yang sama dengan catatan ini (A3 Opsi C selesai sejak PR #40 dan restorability
+10/10 tabel; Tahap 1 & 2 redesain navigasi selesai).
+
+**Masih terbuka / perlu aksi Reno:** (a) Tahap 2 rotasi secret setelah backup Senin 5 Okt sukses;
+(b) audit 24 fungsi anon; (c) perbaikan tipe `'peringatan'` di `alert_auto_backup_bermasalah`
+(draf migrasi sudah disiapkan, belum diterapkan); (d) `DEPLOYMENT_HISTORY_ARCHIVE.md` + keputusan
+jalur Vercel; (e) domain Hostinger.
+
+**Butir yang ditutup di sesi ini:** project Supabase throwaway
+`gensiti-a3-restore-verification-throwaway` **sudah dihapus tuntas**. Bukti: Dashboard org
+"KMM Bekasi Timur" (29 Sep 2026) hanya menampilkan "GENSITI's Project" *(dilaporkan Reno)*, dan
+`list_projects` juga hanya mengembalikan satu project *(terverifikasi 30 Sep)*. Peringatan
+"TINDAK LANJUT MANUAL" di entri 29 Juli di bawah sudah tidak berlaku.
+
+**Konvensi catatan migrasi:** repo tidak punya folder `supabase/migrations` (migrasi diterapkan lewat
+Supabase MCP `apply_migration`, lihat §1). Jejak migrasi = riwayat migrasi Supabase
+(`list_migrations`: `revoke_public_execute_internal_cron_functions` v20260930085840,
+`tahap1_internal_secret_via_vault` v20261003040015) + catatan di dokumen ini dan ARCHITECTURE.md.
+SQL lengkapnya tidak disimpan di repo.
+
 ### Sesi 3 September 2026 — Verifikasi branch protection `main` pasca transfer ownership + menutup celah required status check
 
 Reno minta cek ulang (read-only) branch protection rule `main` di
@@ -94,6 +231,9 @@ verifikasi restore, sudah di-**pause** tapi **BELUM terhapus tuntas** — MCP to
 tersedia tidak punya `delete_project` (cuma `pause_project`). Tolong hapus manual lewat
 Supabase Dashboard → Project Settings → General → Delete Project, supaya tidak menggantung
 selamanya di organisasi.
+
+> **Ditutup 4 Okt 2026:** project throwaway itu sudah dihapus tuntas (bukti di entri "Sesi 30 Sep –
+> 4 Okt 2026" di atas). Peringatan ini dipertahankan hanya sebagai catatan historis.
 
 Opsi B (reminder mingguan) sudah selesai sesi sebelumnya. Sesi ini mengerjakan Opsi C yang
 sempat ditunda (assessment awal: "red flag" soal siapa boleh akses file backup otomatis,

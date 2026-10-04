@@ -96,7 +96,7 @@ punya gate sendiri, lihat §4).
 |---|---|
 | `notifikasi` | Notifikasi in-app |
 | `push_subscriptions` | Endpoint push notification browser (web push) |
-| `email_log` | Log pengiriman email via Resend (pengumuman/kegiatan/reminder/approval/reset password/maintenance) |
+| `email_log` | Log pengiriman email via Resend (pengumuman/kegiatan/reminder/approval/reset password/maintenance). Kolom `tipe` dibatasi CHECK `email_log_tipe_check`: hanya `pengumuman`, `kegiatan`, `reminder`, `approval_ppg`, `reset_password`, `maintenance`, `maintenance_scheduled` -- tipe lain tidak menggagalkan pengiriman email tapi baris log-nya gagal dibuat (ditelan `send-email`). Perlu perhatian: `alert_auto_backup_bermasalah` masih memakai `'peringatan'` (lihat HANDOFF.md) |
 | `email_preferensi` | Opt-in/out notifikasi email per user (default semua true) |
 
 ### Sistem & audit
@@ -218,6 +218,36 @@ sebelum migrasi diterapkan). `count_sesi_aktif()` -- agregat jumlah sesi aktif s
 sengaja terbuka utk semua `authenticated` (bukan cuma Super Admin/Team IT) krn cuma 1 angka
 total tanpa detail per-device, dipakai kartu "Sesi Aktif" di Monitoring & Log > Kesehatan
 Sistem.
+
+**Secret internal (`x-internal-secret`) & akses fungsi cron/internal (30 Sep – 3 Okt 2026):**
+fungsi database yang memanggil Edge Function lewat `net.http_post` (pola pg_cron/trigger →
+Edge Function dengan `verify_jwt = false`) mengirim header `x-internal-secret`.
+- **Sumber nilai**: Supabase Vault, secret bernama `internal_function_secret`, dibaca lewat
+  `internal.get_internal_secret()` (schema `internal`, `SECURITY DEFINER`, `EXECUTE` hanya
+  `postgres` + `service_role`, `anon`/`authenticated` tanpa `USAGE` schema). Memanggil helper
+  di dalam blok `BEGIN ... EXCEPTION` fungsi pemanggil supaya kegagalan membaca Vault tetap hanya
+  `WARNING` (tidak menggagalkan transaksi pemicu seperti INSERT pengumuman).
+- **Pemanggil (5 fungsi)**: `trigger_scheduled_backup`, `fetch_berita_organisasi_cron`,
+  `fetch_berita_ldii_cron` (sisa lama, tidak dijadwalkan cron), `notify_email`, `notify_push`.
+  Tidak ada lagi literal secret di badan fungsi `public` mana pun.
+- **Pemeriksa (5 Edge Function)**: `send-email`, `send-push`, `fetch-berita-ldii`,
+  `fetch-berita-organisasi`, `scheduled-backup` membandingkan header dengan environment variable
+  function `INTERNAL_FUNCTION_SECRET` (+ fallback bearer service-role). **Env itu belum
+  disambungkan ke Vault** — nilainya harus tetap sama dengan isi Vault sampai rotasi (Tahap 2,
+  belum dikerjakan) mengubah keduanya bersamaan.
+- **Akses fungsi cron**: `trigger_scheduled_backup`, `alert_auto_backup_bermasalah`,
+  `fetch_berita_organisasi_cron` hanya `postgres` (pemilik, dipakai pg_cron) + `service_role`
+  — `EXECUTE` dicabut dari `PUBLIC`/`anon`/`authenticated` (migrasi
+  `revoke_public_execute_internal_cron_functions`). Catatan teknis: ACL default Postgres memberi
+  `EXECUTE` ke `PUBLIC`, jadi mencabut dari `anon` saja tidak berpengaruh; fungsi baru yang
+  hanya boleh dipanggil cron/trigger harus langsung `REVOKE ... FROM PUBLIC, anon, authenticated`.
+  `get_rate_limit_summary` dicabut dari `PUBLIC`/`anon`, `authenticated` tetap (guard
+  Super Admin/Team IT di dalam fungsi).
+- **Belum diaudit**: 24 fungsi `SECURITY DEFINER` lain masih bisa dipanggil `anon` (advisor
+  `anon_security_definer_function_executable`); sebagian mungkin sengaja publik. Lihat HANDOFF.md.
+- Migrasi: `tahap1_internal_secret_via_vault` (3 Okt 2026) dan
+  `revoke_public_execute_internal_cron_functions` (30 Sep 2026) — tidak ada file migrasi lokal
+  (lihat HANDOFF.md §1), rujukannya riwayat migrasi Supabase.
 
 **Lainnya**: `global_search` (pencarian lintas modul), `enforce_single_super_admin`
 (trigger — Super Admin akun tunggal mutlak), `rls_auto_enable` (event trigger — RLS wajib
@@ -349,7 +379,8 @@ Kalau restore benar-benar dibutuhkan (mis. data korup/terhapus tidak sengaja):
 
 Melengkapi backup manual di atas (bukan menggantikan) — Edge Function `scheduled-backup`
 dipanggil pg_cron tiap Senin 01:00 UTC (`public.trigger_scheduled_backup()`, pola sama
-`fetch_berita_organisasi_cron`), query 10 tabel yang SAMA PERSIS dengan backup manual
+`fetch_berita_organisasi_cron`; sejak 3 Okt 2026 membaca secret header lewat Vault, lihat §4
+"Secret internal"), query 10 tabel yang SAMA PERSIS dengan backup manual
 (3 arah manual-sync sekarang: `app/api/backup/route.ts` ↔ `app/(dashboard)/backup-data/page.tsx`
 ↔ Edge Function `scheduled-backup`) dan upload JSON ke bucket Storage `backups`.
 
@@ -382,7 +413,8 @@ asli (bukan data tiruan) direstore mengikuti PERSIS prosedur §8 di atas. Hasil:
 cocok jumlah barisnya persis dengan `tableStatus` di file (desa 10, kelompok 50, roles 19,
 users 85, generus 84, kegiatan 2, absensi 80, pengumuman 0, dokumen 0, notifikasi 133),
 nol error FK — urutan `BACKUP_TABLES` di §8 terbukti benar terhadap data real. Project
-throwaway di-pause setelah selesai (MCP tidak punya `delete_project`, penghapusan tuntas
+throwaway di-pause setelah selesai, lalu **sudah dihapus tuntas** (dikonfirmasi 4 Okt 2026, lihat
+HANDOFF.md; MCP tidak punya `delete_project`, penghapusan tuntas
 perlu manual lewat Supabase Dashboard — lihat CLAUDE.md & PLAN_MIGRASI_OTORISASI_RPC.md §4
 utk implikasi lebih luas temuan keterbatasan Free plan ini).
 
